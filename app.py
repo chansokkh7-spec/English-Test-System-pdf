@@ -4,107 +4,87 @@ import google.generativeai as genai
 import json
 
 # --- 1. CONFIGURATION ---
-# Your API Key
+# Your API Key is hardcoded here
 GOOGLE_API_KEY = "AIzaSyBfDSDxtCJbypPcLaR2kEagUQfXLQBWXcY"
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-st.set_page_config(page_title="Universal AI Grammar Quiz", layout="wide")
+st.set_page_config(page_title="AI Exam System", layout="wide")
 
-# --- 2. FUNCTIONS ---
+# --- 2. LOGIC FUNCTIONS ---
 
-def extract_text_range(uploaded_file, start_page, end_page):
-    """Extracts text from a specific range of pages to handle large PDFs."""
-    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+def get_pdf_text(file):
+    """Reads PDF content safely."""
+    doc = fitz.open(stream=file.read(), filetype="pdf")
     text = ""
-    # Ensure we don't exceed actual page count
-    end_page = min(end_page, len(doc))
-    for i in range(start_page, end_page):
+    # We read first 15 pages to stay within AI limits
+    limit = min(len(doc), 15)
+    for i in range(limit):
         text += doc[i].get_text()
     return text, len(doc)
 
-def generate_quiz_ai(text, num_q):
-    """Sends sampled text to AI to generate structured JSON quiz."""
+def ask_gemini(context, count):
+    """Uses AI to generate questions."""
     prompt = f"""
-    You are an English examiner. Based on the text provided, create {num_q} multiple-choice questions.
-    Requirements:
-    1. Each question must have 4 options: (a), (b), (c), (d).
-    2. Provide the correct answer letter.
-    3. Return ONLY a valid JSON list.
-    
-    Format Example:
-    [
-      {{"id": 1, "question": "example?", "options": ["opt1", "opt2", "opt3", "opt4"], "correct": "a"}}
-    ]
-    
-    Text: {text[:10000]}
+    Create {count} English grammar multiple-choice questions based on this text.
+    Return ONLY a JSON list. 
+    Format: [{"id": 1, "question": "...", "options": ["a", "b", "c", "d"], "correct": "a"}]
+    Text: {context[:9000]}
     """
     try:
         response = model.generate_content(prompt)
-        # Clean AI response to ensure it's pure JSON
-        raw_text = response.text.strip().replace('```json', '').replace('```', '')
-        return json.loads(raw_text)
-    except Exception as e:
-        st.error(f"AI Generation Error: {e}")
+        # Remove any markdown backticks
+        clean_json = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_json)
+    except:
         return None
 
 # --- 3. SESSION STATE ---
-if 'quiz_questions' not in st.session_state:
-    st.session_state.quiz_questions = []
+if 'quiz' not in st.session_state:
+    st.session_state.quiz = []
 
-# --- 4. USER INTERFACE ---
-st.title("🎓 Universal AI English Quiz Generator")
-st.info("Upload any English book (up to 5,000 pages). AI will analyze it and build a test.")
+# --- 4. UI ---
+st.title("🎓 Universal AI Exam Generator")
+st.write("Upload any PDF book to create an instant test.")
 
-pdf_file = st.file_uploader("Upload PDF File", type="pdf")
+uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
-if pdf_file:
-    # Sidebar for controls
-    st.sidebar.header("Test Settings")
-    total_pages_count = fitz.open(stream=pdf_file.getvalue(), filetype="pdf").page_count
+if uploaded_file:
+    num_q = st.sidebar.slider("Number of Questions", 5, 20, 10)
     
-    # Allow user to choose which part of the book to test on
-    page_start = st.sidebar.number_input("Start Page", min_value=1, max_value=total_pages_count, value=1)
-    page_end = st.sidebar.number_input("End Page", min_value=page_start, max_value=total_pages_count, value=min(page_start+10, total_pages_count))
-    num_questions = st.sidebar.slider("Number of Questions", 5, 20, 10)
+    if st.button("Generate Quiz ✨"):
+        with st.spinner("AI is reading the book..."):
+            text_data, total_pg = get_pdf_text(uploaded_file)
+            questions = ask_gemini(text_data, num_q)
+            if questions:
+                st.session_state.quiz = questions
+                st.success(f"Generated {len(questions)} questions from the book!")
+            else:
+                st.error("AI Busy. Please click the button again.")
 
-    if st.button("Generate Test ✨"):
-        with st.spinner(f"AI is reading pages {page_start} to {page_end}..."):
-            # Reset file pointer and read text
-            pdf_file.seek(0)
-            context_text, _ = extract_text_range(pdf_file, page_start-1, page_end)
-            
-            # Generate Quiz
-            result = generate_quiz_ai(context_text, num_questions)
-            if result:
-                st.session_state.quiz_questions = result
-                st.success("Test Generated Successfully!")
-
-# --- 5. DISPLAY TEST ---
-if st.session_state.quiz_questions:
-    st.write("---")
+# --- 5. DISPLAY QUIZ ---
+if st.session_state.quiz:
+    st.divider()
     with st.form("exam_form"):
-        student_answers = {}
-        for q in st.session_state.quiz_questions:
-            st.write(f"**Question {q['id']}:** {q['question']}")
-            
-            # Options labels
-            labels = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(c) {q['options'][2]}", f"(d) {q['options'][3]}"]
-            user_choice = st.radio(f"Select answer for Q{q['id']}", labels, key=f"user_q_{q['id']}", index=None, label_visibility="collapsed")
-            
-            # Store answer letter (a, b, c, or d)
-            student_answers[q['id']] = user_choice[1] if user_choice else None
+        user_picks = {}
+        for q in st.session_state.quiz:
+            st.write(f"**Q{q['id']}: {q['question']}**")
+            # Build choice labels
+            choices = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(f) {q['options'][2]}", f"(d) {q['options'][3]}"]
+            pick = st.radio("Select answer:", choices, key=f"ans_{q['id']}", index=None, label_visibility="collapsed")
+            user_picks[q['id']] = pick[1] if pick else None
             st.write("---")
-            
-        if st.form_submit_button("Submit & Show Results"):
+        
+        if st.form_submit_button("Submit and Show Score"):
             score = 0
-            st.subheader("Examination Results:")
-            for q in st.session_state.quiz_questions:
-                correct_letter = q['correct'].lower()
-                if student_answers[q['id']] == correct_letter:
-                    st.success(f"✅ Q{q['id']}: Correct!")
+            for q in st.session_state.quiz:
+                right_ans = q['correct'].lower()
+                if user_picks[q['id']] == right_ans:
+                    st.success(f"Q{q['id']}: Correct!")
                     score += 1
                 else:
-                    st.error(f"❌ Q{q['id']}: Wrong! The correct answer was ({correct_letter})")
+                    st.error(f"Q{q['id']}: Incorrect. Correct answer was ({right_ans})")
             
-            st.metric("Your Final Score", f"{(score/len(st.session_state.quiz_questions))*100:.0f}%", f"{score}/{len(st.session_state.quiz_questions)}")
+            st.subheader(f"Total Score: {score}/{len(st.session_state.quiz)}")
+            if score == len(st.session_state.quiz):
+                st.balloons()
