@@ -4,94 +4,88 @@ import google.generativeai as genai
 import json
 import re
 
-# --- ១. ការកំណត់ API ---
+# --- 1. CONFIGURATION ---
+# API Key របស់អ្នក
 API_KEY = "AIzaSyBfDSDxtCJbypPcLaR2kEagUQfXLQBWXcY"
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+
+# ប្រើឈ្មោះ Full Path ដើម្បីបង្ខំឱ្យ Server ស្គាល់ Model ជានិច្ច
+# វិធីនេះនឹងបំបាត់ Error 404 models/gemini-1.5-flash is not found
+MODEL_NAME = 'models/gemini-1.5-flash' 
+
+try:
+    model = genai.GenerativeModel(MODEL_NAME)
+except:
+    # បើនៅតែរកមិនឃើញ ប្រើ Model ជំនាន់មូលដ្ឋាន
+    model = genai.GenerativeModel('models/gemini-pro')
 
 st.set_page_config(page_title="AI Exam Extractor", layout="wide")
 
-# --- ២. មុខងារអាន PDF ---
+# --- 2. FUNCTIONS ---
 def get_pdf_text(file):
     try:
         file.seek(0)
         doc = fitz.open(stream=file.read(), filetype="pdf")
         text = ""
-        # អាន ១៥ ទំព័រដំបូង ដើម្បីស្វែងរកសំណួរ
+        # អាន ១៥ ទំព័រដំបូង
         for i in range(min(len(doc), 15)):
             text += doc[i].get_text()
         return text.strip()
     except Exception as e:
-        st.error(f"Error reading PDF: {e}")
         return ""
 
-# --- ៣. UI រៀបចំកម្មវិធី ---
-if 'quiz' not in st.session_state:
-    st.session_state.quiz = []
-
-st.title("📖 ប្រព័ន្ធបង្កើតតេស្តដោយដកស្រង់សំណួរពីសៀវភៅ")
-st.info("បញ្ចូលសៀវភៅ PDF ដែលមានសំណួរស្រាប់ AI នឹងដកស្រង់សំណួរទាំងនោះមកដាក់ក្នុងទម្រង់តេស្តឱ្យអ្នក។")
+# --- 3. UI ---
+st.title("📖 ប្រព័ន្ធទាញយកតេស្តចេញពីសៀវភៅ PDF")
+st.info("AI នឹងស្កេនរកសំណួរដែលមានស្រាប់ក្នុងសៀវភៅ រួចរៀបចំជាតេស្តឱ្យអ្នក។")
 
 uploaded_file = st.file_uploader("Upload សៀវភៅ PDF របស់អ្នក", type="pdf")
 
 if uploaded_file:
     if st.button("ស្វែងរក និងបង្កើតតេស្ត ✨"):
-        with st.spinner("AI កំពុងស្កេនរកសំណួរក្នុងសៀវភៅ..."):
+        with st.spinner("AI កំពុងស្វែងរកសំណួរក្នុងសៀវភៅ..."):
             raw_text = get_pdf_text(uploaded_file)
             
             if raw_text:
-                # Prompt បញ្ជាឱ្យ AI រកសំណួរដែលមានស្រាប់ក្នុងអត្ថបទ
-                prompt = "Look into the text provided and find the existing multiple choice questions. "
-                prompt += "Extract them exactly as they are in the book. "
-                prompt += "Return ONLY a JSON list of these questions. "
+                # បញ្ជាឱ្យ AI រកសំណួរដែលមានស្រាប់
+                prompt = "Find all multiple choice questions existing in this text. "
+                prompt += "Extract them and return ONLY a JSON list. "
                 prompt += 'Format: [{"id":1, "question":"...", "options":["a","b","c","d"], "correct":"a"}] '
-                prompt += "\n\nText content:\n" + raw_text[:8000]
+                prompt += "\n\nText:\n" + raw_text[:8000]
                 
                 try:
                     response = model.generate_content(prompt)
-                    # ប្រើ Regex ចាប់យក JSON
+                    # ឆ្កឹះយកតែ JSON
                     json_data = re.search(r'\[.*\]', response.text, re.DOTALL)
                     
                     if json_data:
                         st.session_state.quiz = json.loads(json_data.group())
                         st.success(f"រកឃើញសំណួរចំនួន {len(st.session_state.quiz)} ក្នុងសៀវភៅ!")
                     else:
-                        st.error("AI មិនអាចស្វែងរកសំណួរក្នុងទំព័រទាំងនេះបានទេ។")
+                        st.error("AI រកសំណួរក្នុងទំព័រទាំងនេះមិនឃើញទេ។ សូមសាកល្បង PDF ផ្សេង។")
                 except Exception as e:
-                    st.error(f"API Error: {e}")
+                    st.error(f"API Error: {str(e)}")
             else:
                 st.error("មិនអាចអានអត្ថបទបានទេ។")
 
-# --- ៤. ការបង្ហាញតេស្ត ---
-if st.session_state.quiz:
+# --- 4. DISPLAY ---
+if 'quiz' in st.session_state and st.session_state.quiz:
     st.divider()
     score = 0
     with st.form("exam_form"):
         for q in st.session_state.quiz:
             st.subheader(f"សំណួរទី {q['id']}: {q['question']}")
+            choice = st.radio("ជ្រើសរើសចម្លើយ៖", q['options'], key=f"q_{q['id']}", index=None)
             
-            # បង្ហាញ Choice
-            choice = st.radio(
-                "ជ្រើសរើសចម្លើយ៖", 
-                q['options'], 
-                key=f"q_{q['id']}", 
-                index=None
-            )
-            
-            # ឆែកចម្លើយ (បំប្លែង a, b, c, d ទៅជា Text)
+            # Logic ដាក់ពិន្ទុ
             try:
                 correct_letter = q['correct'].lower().strip()
                 correct_index = ord(correct_letter) - 97
-                correct_text = q['options'][correct_index]
-                
-                if choice == correct_text:
+                if choice == q['options'][correct_index]:
                     score += 1
-            except:
-                pass
+            except: pass
             st.write("---")
             
-        if st.form_submit_button("Submit & Check Result"):
+        if st.form_submit_button("Submit Result"):
             st.header(f"ពិន្ទុសរុប: {score} / {len(st.session_state.quiz)}")
             if score == len(st.session_state.quiz):
                 st.balloons()
-                st.success("អស្ចារ្យ! អ្នកឆ្លើយត្រូវទាំងអស់។")
