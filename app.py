@@ -3,120 +3,86 @@ import pandas as pd
 import google.generativeai as genai
 from PyPDF2 import PdfReader
 import io
-import time
 
-# 1. កំណត់ការបង្ហាញទំព័រ
+# 1. Config
 st.set_page_config(page_title="SEG AI Master 2026", page_icon="🏫", layout="wide")
 
-# 2. ការកំណត់ AI - ប្រើបច្ចេកទេសស្វែងរក Model ដោយស្វ័យប្រវត្តិ
-API_KEY = "AIzaSyBHcXDGDZjE43glfOLCCspV1N1NhIX05S4"
-genai.configure(api_key=API_KEY)
+# 2. Secure API Setup (ប្រើ Streamlit Secrets ដើម្បីសុវត្ថិភាព)
+# ប្រសិនបើអ្នកគ្រូមិនទាន់បានដាក់ក្នុង Secrets កូដនឹងប្រើ Key ចាស់ជាបណ្ដោះអាសន្ន
+api_key = st.secrets.get("GOOGLE_API_KEY", "AIzaSyBHcXDGDZjE43glfOLCCspV1N1NhIX05S4")
+genai.configure(api_key=api_key)
 
 @st.cache_resource
-def load_robust_model():
-    # ស្វែងរកម៉ូដែលដែលគាំទ្រ generateContent ក្នុង Account របស់អ្នកគ្រូ
+def get_model():
     try:
+        # ស្វែងរក Model ដែលដើរក្នុងតំបន់របស់អ្នកគ្រូ
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # ជ្រើសរើស Flash ជាអាទិភាព បើមិនមានយក Pro ឬអាដំបូងគេ
-        target = next((m for m in models if 'flash' in m), models[0])
-        return genai.GenerativeModel(target), target
-    except Exception as e:
-        return None, str(e)
+        name = next((m for m in models if '1.5-flash' in m), models[0])
+        return genai.GenerativeModel(name), name
+    except:
+        return None, "Error"
 
-model, model_name = load_robust_model()
+model, model_name = get_model()
 
-# 3. CSS សម្រាប់ដេគ័រឱ្យមានវិជ្ជាជីវៈ
+# 3. CSS
 st.markdown("""
-    <style>
-    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background-color: #003057; color: white; font-weight: bold; border: none; }
-    .footer { text-align: center; color: #777; font-size: 0.8em; margin-top: 50px; padding: 20px; border-top: 1px solid #eee; }
-    .stAlert { border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+    .stButton>button {width: 100%; border-radius: 10px; height: 3.5em; background-color: #003057; color: white; font-weight: bold;}
+    .footer {text-align: center; color: #888; font-size: 0.8em; margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px;}
+</style>
+""", unsafe_allow_html=True)
 
-# 4. Sidebar ម៉ឺនុយ
+# 4. Sidebar
 with st.sidebar:
-    st.markdown("<h2 style='text-align: center;'>🏫 SEG System</h2>", unsafe_allow_html=True)
+    try:
+        st.image("logo.png", use_container_width=True)
+    except:
+        st.markdown("<h2 style='text-align: center;'>🏫 SEG System</h2>", unsafe_allow_html=True)
     st.divider()
-    menu = st.radio("Menu Navigation", ["📊 Student Dashboard", "📝 AI Quiz Generator"])
+    menu = st.radio("Menu", ["📊 Dashboard", "📝 AI Quiz Generator"])
     st.divider()
     if model:
-        st.success(f"AI Status: Online ({model_name.split('/')[-1]})")
+        st.success(f"AI: Online ({model_name.split('/')[-1]})")
     else:
-        st.error("AI Status: Offline (Check Key)")
+        st.error("AI: Offline (Key Blocked)")
     st.info("Branch: Prek Leap\nDeveloper: CHAN Sokhoeurn")
 
-# 5. Dashboard គ្រប់គ្រងពិន្ទុ
-if menu == "📊 Student Dashboard":
+# 5. Dashboard
+if menu == "📊 Dashboard":
     st.title("📊 Student Management Dashboard")
-    st.write("ប្រព័ន្ធគ្រប់គ្រងទិន្នន័យសិស្សសាលា SEG សាខាព្រែកលាប")
-    st.info("មុខងារ Dashboard រក្សាទុកទិន្នន័យកំពុងដំណើរការជាធម្មតា។")
+    st.info("ប្រព័ន្ធគ្រប់គ្រងពិន្ទុដំណើរការធម្មតា។")
 
-# 6. AI Quiz Generator (សម្រាប់សៀវភៅ ១,៥០០ ទំព័រ)
+# 6. AI Quiz Generator
 else:
     st.title("📝 AI Smart Quiz Generator")
-    st.write("បង្កើតវិញ្ញាសាតេស្តដោយស្វ័យប្រវត្តិចេញពីសៀវភៅ PDF")
-
-    pdf_file = st.file_uploader("បញ្ចូលសៀវភៅ PDF របស់អ្នកគ្រូ (1,500 Pages Support)", type="pdf")
-
-    if pdf_file:
-        # ការអាន PDF
-        pdf_reader = PdfReader(io.BytesIO(pdf_file.read()))
-        total_pages = len(pdf_reader.pages)
-        st.success(f"បានរកឃើញសៀវភៅចំនួន {total_pages} ទំព័រ")
-
+    f = st.file_uploader("Upload PDF Book", type="pdf")
+    if f:
+        pdf = PdfReader(io.BytesIO(f.read()))
+        total = len(pdf.pages)
+        st.success(f"ឯកសារមានសរុប {total} ទំព័រ")
+        
         st.divider()
-        col1, col2 = st.columns(2)
-        with col1:
-            level = st.selectbox("កម្រិតសិក្សា (Level)", ["Elementary", "Intermediate", "Advanced"])
-            num_q = st.slider("ចំនួនសំណួរ", 5, 30, 10)
-        with col2:
-            st.write("🎯 **ជ្រើសរើសចន្លោះទំព័រមេរៀន**")
-            p_start = st.number_input("ចាប់ពីទំព័រ", min_value=1, max_value=total_pages, value=1)
-            p_end = st.number_input("ដល់ទំព័រ", min_value=1, max_value=total_pages, value=min(p_start+5, total_pages))
+        c1, c2 = st.columns(2)
+        with c1:
+            lvl = st.selectbox("Level", ["Elementary", "Intermediate", "Advanced"])
+            num = st.number_input("Number of Questions", 1, 30, 10)
+        with c2:
+            st.write("🎯 **ជ្រើសរើសចន្លោះទំព័រ**")
+            s_p = st.number_input("From Page", 1, total, 1)
+            e_p = st.number_input("To Page", 1, total, min(s_p+5, total))
 
-        if st.button("🚀 ចាប់ផ្តើមបង្កើតវិញ្ញាសាតេស្ត"):
+        if st.button("🚀 Generate Quiz Now"):
             if not model:
-                st.error("មិនអាចភ្ជាប់ទៅ Google AI បានទេ។ សូមពិនិត្យ API Key របស់អ្នកគ្រូ។")
-            elif p_start > p_end:
-                st.error("កំហុស៖ ទំព័រចាប់ផ្ដើមមិនអាចធំជាងទំព័របញ្ចប់ទេ។")
+                st.error("API Key របស់អ្នកគ្រូត្រូវបាន Google បិទហើយ។ សូមបង្កើត Key ថ្មី។")
             else:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                try:
-                    status_text.text("កំពុងដកស្រង់អត្ថបទពី PDF...")
-                    progress_bar.progress(30)
-                    
-                    extracted_text = ""
-                    # អានម្ដងបន្តិចៗដើម្បីការពារ Memory
-                    for i in range(p_start - 1, p_end):
-                        extracted_text += pdf_reader.pages[i].extract_text()
-                    
-                    progress_bar.progress(60)
-                    status_text.text("AI កំពុងរៀបចំសំណួរ...")
-                    
-                    prompt = f"""
-                    Task: Create a professional English Grammar quiz.
-                    Source Text: {extracted_text[:10000]}
-                    Questions: {num_q}
-                    Level: {level}
-                    Format: Q1: [Question] / (a) (b) (c) (d)
-                    Note: Include an 'Answer Key' at the very end.
-                    """
-                    
-                    response = model.generate_content(prompt)
-                    
-                    progress_bar.progress(100)
-                    status_text.text("ជោគជ័យ!")
-                    
-                    st.divider()
-                    st.subheader("✨ វិញ្ញាសាតេស្តដែលបានបង្កើតរួចរាល់")
-                    st.markdown(response.text)
-                    st.download_button("📥 ទាញយកជាឯកសារ .txt", response.text, file_name=f"SEG_Quiz_P{p_start}.txt")
-                    
-                except Exception as e:
-                    st.error(f"បញ្ហាបច្ចេកទេស៖ {str(e)}")
-                    st.warning("ជំនួយ៖ សូមសាកល្បងជ្រើសរើសចំនួនទំព័រឱ្យតិចជាងមុន (ត្រឹម ១-៣ ទំព័រ) ដើម្បីតេស្តសិន។")
+                with st.spinner("AI កំពុងអានមេរៀន..."):
+                    try:
+                        text = "".join([pdf.pages[i].extract_text() for i in range(s_p-1, e_p)])
+                        prompt = f"Create a {lvl} English test. Questions: {num}. Format: Q1: [Question] / (a,b,c,d). Include Answer Key. Text: {text[:10000]}"
+                        res = model.generate_content(prompt)
+                        st.markdown(res.text)
+                        st.download_button("📥 Download", res.text, file_name="Quiz.txt")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
 
 st.markdown('<div class="footer">© 2026 SEG School Management System | Prek Leap Branch</div>', unsafe_allow_html=True)
