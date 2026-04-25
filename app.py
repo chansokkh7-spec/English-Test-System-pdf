@@ -5,105 +5,96 @@ import json
 import re
 
 # --- 1. API SETUP ---
-# Secure your API Key
+# Using your provided API Key
 GOOGLE_API_KEY = "AIzaSyBfDSDxtCJbypPcLaR2kEagUQfXLQBWXcY"
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 st.set_page_config(page_title="AI Quiz System", layout="wide")
 
-# --- 2. FUNCTIONS ---
-def get_text(file):
+# --- 2. CLEANING FUNCTION ---
+def clean_illegal_chars(text):
+    """Removes non-breaking spaces and other hidden formatting characters."""
+    return text.replace('\u00a0', ' ').replace('\u202f', ' ').strip()
+
+# --- 3. LOGIC FUNCTIONS ---
+def get_pdf_content(file):
     try:
         doc = fitz.open(stream=file.read(), filetype="pdf")
-        text = ""
-        # Read a maximum of 15 pages to stay within prompt limits
+        full_text = ""
+        # Read first 15 pages to stay within AI limits
         for i in range(min(len(doc), 15)):
-            text += doc[i].get_text()
-        return text.strip()
+            full_text += doc[i].get_text()
+        return clean_illegal_chars(full_text)
     except Exception as e:
-        st.error(f"Error reading PDF: {e}")
+        st.error(f"PDF Error: {e}")
         return ""
 
-def create_quiz(text, count):
-    if not text:
-        st.error("The PDF appears to be empty or an image (not readable text).")
-        return None
-
+def call_ai_api(context_text, q_count):
     prompt = f"""
-    Create {count} English Multiple Choice Questions based on the text below.
-    Return ONLY a valid JSON list of objects.
-    Structure: [{{"id":1,"question":"...","options":["choice1","choice2","choice3","choice4"],"correct":"a"}}]
-    
-    Rules:
-    - Options must be a list of 4 strings.
-    - 'correct' must be a single letter: 'a', 'b', 'c', or 'd'.
-    
-    Text content:
-    {text[:7000]}
+    Create {q_count} English grammar MCQs from the text below. 
+    Return ONLY a JSON list. No intro text.
+    Format: [{"id":1, "question":"...", "options":["a","b","c","d"], "correct":"a"}]
+    Text: {context_text[:8000]}
     """
-    
     try:
         response = model.generate_content(prompt)
-        raw_output = response.text
-        
-        # --- REINFORCED JSON CLEANING ---
-        # This removes markdown code blocks like ```json ... ```
-        json_match = re.search(r'\[.*\]', raw_output, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        else:
-            # Fallback for plain text response
-            return json.loads(raw_output.strip())
+        res_text = response.text
+        # Extract JSON using Regex in case AI adds extra words
+        match = re.search(r'\[.*\]', res_text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        return None
     except Exception as e:
         st.error(f"AI Error: {e}")
         return None
 
-# --- 3. UI ---
-st.title("🎓 AI English Exam Generator")
+# --- 4. STREAMLIT UI ---
+st.title("🎓 Universal AI English Test")
 
-if 'quiz' not in st.session_state:
-    st.session_state.quiz = []
+if 'quiz_data' not in st.session_state:
+    st.session_state.quiz_data = []
 
-file = st.file_uploader("Upload PDF", type="pdf")
+uploaded_pdf = st.file_uploader("Upload PDF File", type="pdf")
 
-if file:
-    num = st.sidebar.slider("Number of Questions", 5, 20, 10)
+if uploaded_pdf:
+    num_questions = st.sidebar.slider("Questions", 5, 20, 10)
+    
     if st.button("Generate Test ✨"):
-        with st.spinner("AI is analyzing the document..."):
-            # Reset file pointer before reading
-            file.seek(0)
-            txt = get_text(file)
-            questions = create_quiz(txt, num)
+        with st.spinner("AI is reading your book..."):
+            uploaded_pdf.seek(0)
+            extracted_text = get_pdf_content(uploaded_pdf)
             
-            if questions:
-                st.session_state.quiz = questions
-                st.success("Test Generated Successfully!")
+            if extracted_text:
+                questions = call_ai_api(extracted_text, num_questions)
+                if questions:
+                    st.session_state.quiz_data = questions
+                    st.success("Test Generated!")
+                else:
+                    st.warning("AI failed to create JSON. Please try again.")
             else:
-                st.warning("AI failed to format the questions. Please click 'Generate' again.")
+                st.error("Could not read text from PDF.")
 
-# --- 4. TEST FORM ---
-if st.session_state.quiz:
+# --- 5. TEST DISPLAY ---
+if st.session_state.quiz_data:
     with st.form("test_form"):
-        user_ans = {}
-        for q in st.session_state.quiz:
+        user_selections = {}
+        for q in st.session_state.quiz_data:
             st.write(f"**Q{q['id']}: {q['question']}**")
-            # Map a,b,c,d to the option list
-            opts = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(c) {q['options'][2]}", f"(d) {q['options'][3]}"]
-            ans = st.radio("Select answer:", opts, key=f"q{q['id']}", index=None, label_visibility="collapsed")
-            user_ans[q['id']] = ans[1] if ans else None
+            # Build radio options
+            choices = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(c) {q['options'][2]}", f"(d) {q['options'][3]}"]
+            user_pick = st.radio("Select:", choices, key=f"ans_{q['id']}", index=None, label_visibility="collapsed")
+            user_selections[q['id']] = user_pick[1] if user_pick else None
             st.write("---")
         
-        if st.form_submit_button("Submit & Check Score"):
+        if st.form_submit_button("Submit & See Score"):
             score = 0
-            for q in st.session_state.quiz:
-                correct = q['correct'].lower()
-                if user_ans[q['id']] == correct:
-                    st.success(f"Q{q['id']}: Correct! (Answer: {correct})")
+            for q in st.session_state.quiz_data:
+                correct_letter = q['correct'].lower()
+                if user_selections[q['id']] == correct_letter:
+                    st.success(f"Q{q['id']}: Correct! (Answer: {correct_letter})")
                     score += 1
                 else:
-                    st.error(f"Q{q['id']}: Wrong! (The correct answer was: {correct})")
+                    st.error(f"Q{q['id']}: Incorrect! (Correct was: {correct_letter})")
             
-            st.subheader(f"Total Score: {score}/{len(st.session_state.quiz)}")
-            if score == len(st.session_state.quiz):
-                st.balloons()
+            st.subheader(f"Final Score: {score}/{len(st.session_state.quiz_data)}")
