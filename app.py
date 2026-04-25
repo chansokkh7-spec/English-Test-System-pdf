@@ -5,76 +5,76 @@ import json
 import re
 
 # --- ការកំណត់ API ---
-# API Key របស់អ្នក
 API_KEY = "AIzaSyBfDSDxtCJbypPcLaR2kEagUQfXLQBWXcY"
 genai.configure(api_key=API_KEY)
 
-# ប្តូរមកប្រើ gemini-pro ដើម្បីជៀសវាង Error 404
-model = genai.GenerativeModel('gemini-pro')
+# ប្រើ Model នេះដើម្បីការពារ Error 404
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-st.set_page_config(page_title="AI Exam Pro", layout="centered")
-st.title("🎓 AI English Exam Generator")
+st.set_page_config(page_title="Grammar Quiz System", layout="wide")
 
-# ១. កន្លែង Upload PDF
-pdf_file = st.file_uploader("បញ្ចូលសៀវភៅ PDF របស់អ្នក", type="pdf")
+# --- មុខងារទាញយកអត្ថបទ ---
+def get_pdf_text(file):
+    doc = fitz.open(stream=file.read(), filetype="pdf")
+    text = ""
+    for i in range(min(len(doc), 10)):
+        text += doc[i].get_text()
+    return text
 
-if pdf_file:
-    if st.button("Generate Test ✨"):
-        with st.spinner("AI កំពុងវិភាគ និងបង្កើតសំណួរ..."):
-            try:
-                # ២. ទាញយកអត្ថបទពី PDF
-                doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-                text_content = ""
-                for i in range(min(len(doc), 10)):  # អាន ១០ ទំព័រដំបូង
-                    text_content += doc[i].get_text()
-                
-                if len(text_content.strip()) < 100:
-                    st.error("❌ PDF នេះអានអត្ថបទមិនចេញទេ។ វាអាចជារូបភាពថត។")
-                else:
-                    # ៣. បង្កើត Prompt (ការពារ Error syntax)
-                    prompt = "Create 5 English grammar MCQs from this text.\n"
-                    prompt += "Return ONLY a JSON list.\n"
-                    prompt += 'Format: [{"id":1, "question":"...", "options":["a","b","c","d"], "correct":"a"}]\n\n'
-                    prompt += "Text: " + text_content[:5000]
-                    
-                    response = model.generate_content(prompt)
-                    
-                    # ប្រើ Regex ដើម្បីចាប់យក JSON
-                    json_match = re.search(r'\[.*\]', response.text, re.DOTALL)
-                    
-                    if json_match:
-                        st.session_state.quiz = json.loads(json_match.group())
-                        st.success("✅ បង្កើតសំណួរបានជោគជ័យ!")
-                    else:
-                        st.error("⚠️ AI បង្កើតទម្រង់ JSON មិនត្រឹមត្រូវ។ សូមចុច Generate ម្ដងទៀត។")
-            except Exception as e:
-                st.error(f"❌ កំហុសបច្ចេកទេស: {str(e)}")
+# --- ចុចបង្កើតសំណួរ ---
+if 'quiz' not in st.session_state:
+    st.session_state.quiz = []
 
-# ៤. បង្ហាញសំណួរ និងដាក់ពិន្ទុ
-if 'quiz' in st.session_state:
-    with st.form("exam_form"):
-        user_answers = {}
+st.title("📝 បង្កើតកម្រងសំណួរ PDF ទៅជាតេស")
+
+uploaded_file = st.file_uploader("Upload PDF File", type="pdf")
+
+if uploaded_file:
+    if st.button("បង្កើតតេស្តឥឡូវនេះ"):
+        with st.spinner("កំពុងដំណើរការ..."):
+            raw_text = get_pdf_text(uploaded_file)
+            
+            # Prompt បែបសាមញ្ញដើម្បីឱ្យ AI ផ្ញើទិន្នន័យមកត្រឹមត្រូវ
+            prompt = "Create 10 English grammar MCQs from this text. Return ONLY a JSON list. "
+            prompt += 'Format: [{"id": 1, "question": "...", "options": ["a", "b", "c", "d"], "correct": "a"}] '
+            prompt += "\n\nText: " + raw_text[:5000]
+            
+            response = model.generate_content(prompt)
+            
+            # ស្វែងរក JSON ក្នុងចម្លើយ AI
+            match = re.search(r'\[.*\]', response.text, re.DOTALL)
+            if match:
+                st.session_state.quiz = json.loads(match.group())
+                st.success("រកឃើញសំណួរចំនួន " + str(len(st.session_state.quiz)) + " ក្នុងផ្នែកនេះ")
+
+# --- បង្ហាញសំណួរ (ទម្រង់ដូចកូដចាស់របស់អ្នក) ---
+if st.session_state.quiz:
+    st.write("---")
+    score = 0
+    with st.form("quiz_form"):
         for q in st.session_state.quiz:
-            st.write(f"**Q{q['id']}: {q['question']}**")
-            choice = st.radio("ជ្រើសរើសចម្លើយ:", q['options'], key=f"q_{q['id']}", index=None)
-            user_answers[q['id']] = choice
+            st.subheader(f"Q{q['id']}: {q['question']}")
+            
+            # រៀបចំ Choice
+            choice = st.radio(
+                f"ជ្រើសរើសចម្លើយសម្រាប់ Q{q['id']}:", 
+                q['options'], 
+                key=f"q_{q['id']}", 
+                index=None
+            )
+            
+            # ឆែកចម្លើយ
+            correct_letter = q['correct'].lower().strip()
+            # បំប្លែង a->0, b->1, c->2, d->3 ដើម្បីផ្ទៀងផ្ទាត់ជាមួយ options
+            correct_idx = ord(correct_letter) - 97
+            
+            if choice == q['options'][correct_idx]:
+                score += 1
+            
             st.write("---")
+            
+        submit = st.form_submit_button("បញ្ជូនចម្លើយ")
         
-        if st.form_submit_button("Submit"):
-            score = 0
-            for q in st.session_state.quiz:
-                # ទាញយកចម្លើយត្រឹមត្រូវ (a=0, b=1, c=2, d=3)
-                try:
-                    correct_letter = q['correct'].lower().strip()
-                    correct_idx = ord(correct_letter) - 97
-                    correct_text = q['options'][correct_idx]
-                    
-                    if user_answers[q['id']] == correct_text:
-                        st.success(f"Q{q['id']}: ត្រឹមត្រូវ! ✅")
-                        score += 1
-                    else:
-                        st.error(f"Q{q['id']}: ខុស! ចម្លើយពិតគឺ: {correct_text} ❌")
-                except:
-                    continue
-                    
-            st.subheader(f"ពិន្ទុរបស់អ្នកគឺ: {score}/{len(st.session_state.quiz)}")
+        if submit:
+            st.balloons()
+            st.header(f"លទ្ធផលរបស់អ្នកគឺ: {score} / {len(st.session_state.quiz)}")
