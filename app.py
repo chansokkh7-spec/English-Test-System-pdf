@@ -1,121 +1,121 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import re
+import google.generativeai as genai
+import json
+import time
 
-st.set_page_config(page_title="English Grammar Test System", layout="wide")
+# --- 1. CONFIGURATION & API SETUP ---
+# API Key របស់អ្នកត្រូវបានបញ្ចូលរួចរាល់
+GOOGLE_API_KEY = "AIzaSyBfDSDxtCJbypPcLaR2kEagUQfXLQBWXcY" 
+genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-def clean_and_extract(uploaded_file):
+st.set_page_config(page_title="Universal AI Quiz System", layout="wide")
+
+# --- 2. FUNCTIONS ---
+
+def extract_text_from_pdf(uploaded_file):
+    """Extract text from any PDF file, even large ones."""
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-    full_text = ""
+    all_pages_text = []
     for page in doc:
-        full_text += page.get_text()
-    
-    # 1. Extract Answer Key
-    ans_key = {}
-    ans_patterns = re.findall(r"A(\d+).*?answer:\s*\(([a-d])\)", full_text, re.DOTALL | re.IGNORECASE)
-    for num, char in ans_patterns:
-        ans_key[int(num)] = char.lower()
+        all_pages_text.append(page.get_text())
+    return all_pages_text
 
-    # 2. Split by "Level #"
-    sections = re.split(r"((?:Elementary|Intermediate|Advanced)\s+level\s+#\s*\d+)", full_text)
+def get_questions_via_ai(text_chunk, num_questions=5):
+    """Use AI to understand the text and generate structured questions."""
+    prompt = f"""
+    Act as an English Professor. Analyze the following text and create {num_questions} 
+    multiple-choice questions (MCQs). Each question must have 4 options (a, b, c, d) 
+    and one correct answer.
     
-    all_tests = {}
-    current_level = "General Test"
+    IMPORTANT: Return ONLY a valid JSON list. Do not include explanations.
+    Format:
+    [
+      {{"id": 1, "question": "Question here", "options": ["Choice 1", "Choice 2", "Choice 3", "Choice 4"], "correct": "a"}},
+      ...
+    ]
     
-    for section in sections:
-        if re.match(r"(?:Elementary|Intermediate|Advanced)\s+level\s+#\s*\d+", section):
-            current_level = section.strip()
-            continue
-        
-        clean_section = section.replace('"', '').replace(',,', ',')
-        q_pattern = r"Q(\d+)\s*\n(.*?)\n\s*\(a\)\s*(.*?)\n\s*\(b\)\s*(.*?)\n\s*\(c\)\s*(.*?)\n\s*\(d\)\s*(.*?)\n"
-        matches = re.findall(q_pattern, clean_section, re.DOTALL)
-        
-        quiz_list = []
-        for m in matches:
-            q_id = int(m[0])
-            quiz_list.append({
-                "id": q_id,
-                "question": m[1].strip(),
-                "options": [m[2].strip(), m[3].strip(), m[4].strip(), m[5].strip()],
-                "correct": ans_key.get(q_id)
-            })
-        
-        if quiz_list:
-            all_tests[current_level] = quiz_list
+    Text: {text_chunk}
+    """
+    try:
+        response = model.generate_content(prompt)
+        # Clean the response text to get pure JSON
+        clean_json = response.text.strip().replace('```json', '').replace('```', '')
+        return json.loads(clean_json)
+    except Exception as e:
+        st.error(f"AI Error: {e}")
+        return []
+
+# --- 3. SESSION STATE ---
+if 'all_questions' not in st.session_state:
+    st.session_state.all_questions = []
+if 'test_generated' not in st.session_state:
+    st.session_state.test_generated = False
+
+# --- 4. USER INTERFACE ---
+st.title("🎓 Universal AI English Quiz Generator")
+st.info("Upload any PDF (Grammar, Stories, or Textbooks). AI will create a 100% accurate test for you.")
+
+# Step 1: Upload File
+uploaded_file = st.file_uploader("Upload your PDF book", type="pdf")
+
+if uploaded_file:
+    # Option to select range or number of questions
+    num_q = st.sidebar.slider("Number of questions to generate", 5, 20, 10)
+    
+    if st.button("Generate Test Now ✨"):
+        with st.spinner("AI is reading and analyzing your book..."):
+            # Extract text
+            pages = extract_text_from_pdf(uploaded_file)
+            # Combine some pages to give AI enough context (e.g., first 5-10 pages)
+            combined_text = "\n".join(pages[:10]) 
             
-    return all_tests
+            # Get questions from AI
+            questions = get_questions_via_ai(combined_text, num_questions=num_q)
+            
+            if questions:
+                st.session_state.all_questions = questions
+                st.session_state.test_generated = True
+                st.success("Test Generated Successfully!")
+            else:
+                st.error("Failed to generate questions. Please try again.")
 
-# --- Session State Management ---
-if 'test_index' not in st.session_state:
-    st.session_state.test_index = 0
-
-# --- UI Layout ---
-st.title("🎓 Automated English Grammar Test")
-st.write("Upload your PDF book to generate interactive tests automatically.")
-
-file = st.file_uploader("Step 1: Upload PDF File", type="pdf")
-
-if file:
-    all_quiz_data = clean_and_extract(file)
+# Step 2: Display Test
+if st.session_state.test_generated:
+    st.write("---")
+    st.header("📝 Interactive English Test")
     
-    if all_quiz_data:
-        test_names = list(all_quiz_data.keys())
+    with st.form("quiz_form"):
+        user_answers = {}
+        for q in st.session_state.all_questions:
+            st.write(f"**Question {q['id']}:** {q['question']}")
+            
+            # Display options
+            opt_labels = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(c) {q['options'][2]}", f"(d) {q['options'][3]}"]
+            choice = st.radio("Choose the correct answer:", opt_labels, key=f"q_{q['id']}", index=None)
+            
+            # Save user selection (extracting just 'a', 'b', 'c', or 'd')
+            user_answers[q['id']] = choice[1] if choice else None
+            st.write("---")
+            
+        submit_button = st.form_submit_button("Submit & Check Results")
         
-        # Sidebar for Navigation
-        st.sidebar.header("📋 Test List")
-        selected_test_name = st.sidebar.selectbox("Select a Test:", test_names, index=st.session_state.test_index)
-        
-        # Display Current Test
-        current_questions = all_quiz_data[selected_test_name]
-        st.header(f"📝 {selected_test_name}")
-
-        # Test Form
-        with st.form(key=f"form_{selected_test_name}"):
-            user_answers = {}
-            for q in current_questions:
-                st.write(f"**Q{q['id']}: {q['question']}**")
-                opts = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(c) {q['options'][2]}", f"(d) {q['options'][3]}"]
+        if submit_button:
+            score = 0
+            st.subheader("Your Results:")
+            for q in st.session_state.all_questions:
+                correct_ans = q['correct'].lower()
+                user_ans = user_answers[q['id']]
                 
-                # Student selects answer here
-                choice = st.radio(f"Select answer for Q{q['id']}:", opts, key=f"q_{q['id']}_{selected_test_name}", index=None)
-                user_answers[q['id']] = choice[1] if choice else None
-                st.write("---")
+                if user_ans == correct_ans:
+                    st.success(f"✅ Q{q['id']}: Correct! (Answer: {correct_ans})")
+                    score += 1
+                else:
+                    st.error(f"❌ Q{q['id']}: Incorrect! (Correct Answer: {correct_ans})")
             
-            # Submit Button
-            submitted = st.form_submit_button("Check Results")
+            final_score = (score / len(st.session_state.all_questions)) * 100
+            st.metric("Final Score", f"{final_score}%", f"{score}/{len(st.session_state.all_questions)}")
             
-            if submitted:
-                score = 0
-                st.subheader("Results:")
-                for q in current_questions:
-                    correct = q['correct']
-                    user_ans = user_answers[q['id']]
-                    
-                    if user_ans == correct:
-                        st.success(f"✅ Q{q['id']}: Correct! (Answer: {correct})")
-                        score += 1
-                    else:
-                        st.error(f"❌ Q{q['id']}: Incorrect! (Correct Answer was: {correct})")
-                
-                st.divider()
-                st.subheader(f"Total Score: {score} / {len(current_questions)}")
-                if score == len(current_questions):
-                    st.balloons()
-
-        # --- Navigation Buttons ---
-        st.write("---")
-        c1, c2, c3 = st.columns([1, 2, 1])
-        
-        with c2:
-            if st.session_state.test_index < len(test_names) - 1:
-                if st.button("➡️ Next Test", use_container_width=True):
-                    st.session_state.test_index += 1
-                    st.rerun()
-            
-            if st.session_state.test_index > 0:
-                if st.button("⬅️ Previous Test", use_container_width=True):
-                    st.session_state.test_index -= 1
-                    st.rerun()
-    else:
-        st.error("No test questions found in this PDF. Please check the format.")
+            if score == len(st.session_state.all_questions):
+                st.balloons()
