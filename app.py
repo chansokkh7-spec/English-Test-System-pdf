@@ -1,80 +1,51 @@
 import streamlit as st
-import fitz  # PyMuPDF
 import google.generativeai as genai
-import json
-import re
+from PyPDF2 import PdfReader
 
-# --- ការកំណត់ API ---
-# API Key របស់អ្នក
-API_KEY = "AIzaSyBfDSDxtCJbypPcLaR2kEagUQfXLQBWXcY"
-genai.configure(api_key=API_KEY)
+# ១. កំណត់ទម្រង់ទំព័រ
+st.set_page_config(page_title="AI Quiz Master", page_icon="📝")
 
-# ប្តូរមកប្រើ gemini-pro ដើម្បីជៀសវាង Error 404
-model = genai.GenerativeModel('gemini-pro')
+# ២. កំណត់ API Key (សូមដូរ YOUR_API_KEY ទៅជា Key ពិតរបស់អ្នកគ្រូ)
+genai.configure(api_key="YOUR_API_KEY")
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-st.set_page_config(page_title="AI Exam Pro", layout="centered")
-st.title("🎓 AI English Exam Generator")
+st.title("📄 SEG AI Test Generator")
+st.write("បំប្លែង PDF ទៅជាវិញ្ញាសាប្រឡងស្វ័យប្រវត្តិ ១០០%")
 
-# ១. កន្លែង Upload PDF
-pdf_file = st.file_uploader("បញ្ចូលសៀវភៅ PDF របស់អ្នក", type="pdf")
+# ៣. កន្លែង Upload PDF
+uploaded_file = st.file_uploader("Upload ឯកសារ Grammar PDF របស់អ្នកគ្រូ", type="pdf")
 
-if pdf_file:
-    if st.button("Generate Test ✨"):
-        with st.spinner("AI កំពុងវិភាគ និងបង្កើតសំណួរ..."):
-            try:
-                # ២. ទាញយកអត្ថបទពី PDF
-                doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-                text_content = ""
-                for i in range(min(len(doc), 10)):  # អាន ១០ ទំព័រដំបូង
-                    text_content += doc[i].get_text()
-                
-                if len(text_content.strip()) < 100:
-                    st.error("❌ PDF នេះអានអត្ថបទមិនចេញទេ។ វាអាចជារូបភាពថត។")
-                else:
-                    # ៣. បង្កើត Prompt (ការពារ Error syntax)
-                    prompt = "Create 5 English grammar MCQs from this text.\n"
-                    prompt += "Return ONLY a JSON list.\n"
-                    prompt += 'Format: [{"id":1, "question":"...", "options":["a","b","c","d"], "correct":"a"}]\n\n'
-                    prompt += "Text: " + text_content[:5000]
-                    
-                    response = model.generate_content(prompt)
-                    
-                    # ប្រើ Regex ដើម្បីចាប់យក JSON
-                    json_match = re.search(r'\[.*\]', response.text, re.DOTALL)
-                    
-                    if json_match:
-                        st.session_state.quiz = json.loads(json_match.group())
-                        st.success("✅ បង្កើតសំណួរបានជោគជ័យ!")
-                    else:
-                        st.error("⚠️ AI បង្កើតទម្រង់ JSON មិនត្រឹមត្រូវ។ សូមចុច Generate ម្ដងទៀត។")
-            except Exception as e:
-                st.error(f"❌ កំហុសបច្ចេកទេស: {str(e)}")
+if uploaded_file is not None:
+    # អានអត្ថបទពី PDF
+    with st.spinner("កំពុងអានឯកសារ..."):
+        pdf_reader = PdfReader(uploaded_file)
+        text_content = ""
+        for page in pdf_reader.pages:
+            text_content += page.extract_text()
+    
+    st.success("អាន PDF រួចរាល់!")
 
-# ៤. បង្ហាញសំណួរ និងដាក់ពិន្ទុ
-if 'quiz' in st.session_state:
-    with st.form("exam_form"):
-        user_answers = {}
-        for q in st.session_state.quiz:
-            st.write(f"**Q{q['id']}: {q['question']}**")
-            choice = st.radio("ជ្រើសរើសចម្លើយ:", q['options'], key=f"q_{q['id']}", index=None)
-            user_answers[q['id']] = choice
-            st.write("---")
-        
-        if st.form_submit_button("Submit"):
-            score = 0
-            for q in st.session_state.quiz:
-                # ទាញយកចម្លើយត្រឹមត្រូវ (a=0, b=1, c=2, d=3)
-                try:
-                    correct_letter = q['correct'].lower().strip()
-                    correct_idx = ord(correct_letter) - 97
-                    correct_text = q['options'][correct_idx]
-                    
-                    if user_answers[q['id']] == correct_text:
-                        st.success(f"Q{q['id']}: ត្រឹមត្រូវ! ✅")
-                        score += 1
-                    else:
-                        st.error(f"Q{q['id']}: ខុស! ចម្លើយពិតគឺ: {correct_text} ❌")
-                except:
-                    continue
-                    
-            st.subheader(f"ពិន្ទុរបស់អ្នកគឺ: {score}/{len(st.session_state.quiz)}")
+    # ប៊ូតុងបង្កើតតេស្ត
+    if st.button("ចាប់ផ្តើមបង្កើតវិញ្ញាសាឥឡូវនេះ"):
+        with st.spinner("AI កំពុងរៀបចំសំណួរ..."):
+            # ប្រើ Prompt ពិសេសដើម្បីឱ្យដូចសៀវភៅ Grammar Test
+            prompt = f"""
+            ផ្អែកលើខ្លឹមសារ PDF នេះ សូមបង្កើតវិញ្ញាសា Grammar Test ចំនួន ១០ សំណួរ។
+            លក្ខខណ្ឌ៖
+            1. ទម្រង់សំណួរ៖ "Q1: [សំណួរ] / (a) [ជម្រើស] (b) [ជម្រើស] (c) [ជម្រើស] (d) [ជម្រើស]"។
+            2. កម្រិត៖ ឱ្យត្រូវតាមខ្លឹមសារមេរៀនក្នុង PDF។
+            3. ចម្លើយ៖ បង្ហាញ Key Answer នៅផ្នែកខាងក្រោមបង្អស់នៃវិញ្ញាសា (ដូចក្នុងសៀវភៅ PDF)។
+            
+            ខ្លឹមសារឯកសារ៖
+            {text_content[:10000]} 
+            """
+            
+            response = model.generate_content(prompt)
+            
+            # បង្ហាញលទ្ធផល
+            st.divider()
+            st.subheader("📝 វិញ្ញាសាដែលបានបង្កើតរួចរាល់")
+            st.markdown(response.text)
+            
+            # ប៊ូតុងសម្រាប់ Copy ឬ Download (Optional)
+            st.download_button("📥 ទាញយកជា Text File", response.text, file_name="generated_test.txt")
