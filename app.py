@@ -2,67 +2,83 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 
-st.set_page_config(page_title="English Test System", layout="wide")
+st.set_page_config(page_title="Grammar Quiz System", layout="wide")
 
-st.title("📚 ប្រព័ន្ធបង្កើតតេស្តស្វ័យប្រវត្តិ")
-st.info("សូមបញ្ចូលសៀវភៅ PDF ដើម្បីចាប់ផ្ដើម")
+def clean_and_extract(uploaded_file):
+    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    
+    # --- ១. ទាញយកចម្លើយពិត (Answer Key) ---
+    # ស្វែងរកទម្រង់៖ A1 answer: (a) ឬ A1 ... answer: (b)
+    ans_key = {}
+    ans_patterns = re.findall(r"A(\d+).*?answer:\s*\(([a-d])\)", text, re.DOTALL | re.IGNORECASE)
+    for num, char in ans_patterns:
+        ans_key[int(num)] = char.lower()
 
-uploaded_file = st.file_uploader("Upload Grammar Test PDF", type="pdf")
+    # --- ២. សម្អាតអត្ថបទដើម្បីស្រួលចាប់សំណួរ ---
+    # លុបសញ្ញា " និងសញ្ញា , ដែលនាំឱ្យរញ៉េរញ៉ៃ
+    clean_text = text.replace('"', '').replace(',,', ',')
+    
+    # --- ៣. ទាញយកសំណួរ ---
+    # Regex ថ្មី៖ ចាប់ពី Q1 រហូតដល់ជម្រើស (d)
+    q_pattern = r"Q(\d+)\s*\n(.*?)\n\s*\(a\)\s*(.*?)\n\s*\(b\)\s*(.*?)\n\s*\(c\)\s*(.*?)\n\s*\(d\)\s*(.*?)\n"
+    matches = re.findall(q_pattern, clean_text, re.DOTALL)
+    
+    quiz_list = []
+    for m in matches:
+        q_id = int(m[0])
+        quiz_list.append({
+            "id": q_id,
+            "question": m[1].strip(),
+            "options": [m[2].strip(), m[3].strip(), m[4].strip(), m[5].strip()],
+            "correct": ans_key.get(q_id)
+        })
+    return quiz_list
 
-if uploaded_file is not None:
-    # ១. អានអត្ថបទពី PDF
-    with st.spinner('កំពុងអានទិន្នន័យ...'):
-        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        text = ""
-        for page in doc:
-            text += page.get_text()
+# --- ផ្ទៃកម្មវិធី UI ---
+st.title("🎓 ប្រព័ន្ធតេស្តភាសាអង់គ្លេសស្វ័យប្រវត្តិ")
+st.markdown("### បញ្ចូលសៀវភៅ PDF ដើម្បីចាប់ផ្ដើមធ្វើតេស្ត")
 
-    # ២. ទាញយកចម្លើយ (Answer Key)
-    # ស្វែងរកទម្រង់៖ A1 answer: (a)
-    answers = {}
-    ans_matches = re.findall(r"A(\d+)\s+.*?answer:\s+\(([a-d])\)", text, re.DOTALL)
-    for num, char in ans_matches:
-        answers[int(num)] = char
+file = st.file_uploader("Upload PDF File", type="pdf")
 
-    # ៣. ទាញយកសំណួរ (Regex នេះទាញយកសំណួរដែលមានសញ្ញា " ដូចសៀវភៅអ្នក)
-    # ទម្រង់៖ "Q1","Question content"... (a)... (b)... (c)... (d)...
-    quiz_pattern = r"\"Q(\d+)\"\s*,\"(.*?)\".*?\(a\)\s*(.*?)\n.*?\(b\)\s*(.*?)\n.*?\(c\)\s*(.*?)\n.*?\(d\)\s*(.*?)\n"
-    questions = re.findall(quiz_pattern, text, re.DOTALL)
-
+if file:
+    questions = clean_and_extract(file)
+    
     if questions:
         st.success(f"រកឃើញសំណួរចំនួន {len(questions)} សំណួរ!")
         
-        # បង្កើត Form សម្រាប់ធ្វើតេស្ត
-        with st.form("test_form"):
-            user_responses = {}
-            
-            # បង្ហាញត្រឹម ១០ សំណួរដំបូងដើម្បីសាកល្បង (អ្នកអាចប្ដូរបាន)
-            for q in questions[:10]:
-                q_id = int(q[0])
-                q_text = q[1].replace('\n', ' ').strip()
-                opts = [q[2].strip(), q[3].strip(), q[4].strip(), q[5].strip()]
-                
-                st.write(f"**សំណួរទី {q_id}:** {q_text}")
-                ans = st.radio(f"ជ្រើសរើសចម្លើយសម្រាប់ Q{q_id}:", 
-                               [f"(a) {opts[0]}", f"(b) {opts[1]}", f"(c) {opts[2]}", f"(d) {opts[3]}"], 
-                               key=f"radio_{q_id}")
-                user_responses[q_id] = ans[1] # យកតែអក្សរ a, b, c ឬ d
+        # បង្កើតការជ្រើសរើសសំណួរ (ឧទាហរណ៍៖ សំណួរទី ១ ដល់ ១០)
+        st.sidebar.header("ការកំណត់")
+        num_to_show = st.sidebar.slider("ចំនួនសំណួរដែលត្រូវបង្ហាញ", 5, len(questions), 10)
+        
+        with st.form("quiz_form"):
+            user_answers = {}
+            for q in questions[:num_to_show]:
+                st.write(f"**Q{q['id']}: {q['question']}**")
+                # បង្កើតជម្រើស radio
+                opts = [f"(a) {q['options'][0]}", f"(b) {q['options'][1]}", f"(c) {q['options'][2]}", f"(d) {q['options'][3]}"]
+                choice = st.radio(f"ជ្រើសរើសចម្លើយសម្រាប់ Q{q['id']}:", opts, key=f"q_{q['id']}")
+                user_answers[q['id']] = choice[1] # ចាប់យកតែតួអក្សរ a, b, c, d
                 st.write("---")
             
-            submit = st.form_submit_button("ពិនិត្យចម្លើយភ្លាមៗ")
+            submitted = st.form_submit_button("ពិនិត្យលទ្ធផលភ្លាមៗ")
             
-            if submit:
+            if submitted:
                 score = 0
-                for q in questions[:10]:
-                    qid = int(q[0])
-                    correct_ans = answers.get(qid)
-                    if user_responses[qid] == correct_ans:
-                        st.success(f"Q{qid}: ត្រឹមត្រូវ! (ចម្លើយ {correct_ans})")
+                for q in questions[:num_to_show]:
+                    correct = q['correct']
+                    user_ans = user_answers[q['id']]
+                    
+                    if user_ans == correct:
+                        st.write(f"✅ **Q{q['id']}**: ត្រឹមត្រូវ! (ចម្លើយ: {correct})")
                         score += 1
                     else:
-                        st.error(f"Q{qid}: ខុស! ចម្លើយត្រឹមត្រូវគឺ ({correct_ans})")
+                        st.write(f"❌ **Q{q['id']}**: ខុស! (ចម្លើយពិតគឺ: {correct if correct else 'មិនមានក្នុង Key'})")
                 
-                st.metric("ពិន្ទុរបស់អ្នកគឺ", f"{score}/10")
-                if score == 10: st.balloons()
+                st.subheader(f"ពិន្ទុសរុប៖ {score} / {num_to_show}")
+                if score == num_to_show:
+                    st.balloons()
     else:
-        st.warning("មិនអាចរកឃើញសំណួរក្នុងទម្រង់ដែលបានកំណត់ទេ។ សូមពិនិត្យឯកសារ PDF ម្ដងទៀត។")
+        st.error("ប្រព័ន្ធមិនអាចទាញយកសំណួរបានទេ។ សូមពិនិត្យមើលថាតើឯកសារ PDF របស់អ្នកត្រូវតាមទម្រង់ដែរឬទេ?")
