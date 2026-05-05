@@ -1,39 +1,51 @@
 import streamlit as st
-from PyPDF2 import PdfReader
 import google.generativeai as genai
+from PyPDF2 import PdfReader
 
-# កំណត់ Key សម្រាប់ប្រើ AI (Gemini)
-# អ្នកគ្រូអាចយក Key នេះពី Google AI Studio (Free)
-genai.configure(api_key="ដាក់_API_KEY_របស់អ្នកគ្រូទីនេះ")
+# ១. កំណត់ទម្រង់ទំព័រ
+st.set_page_config(page_title="AI Quiz Master", page_icon="📝")
 
-st.title("📄 AI Automatic Test Generator")
-st.write("Upload PDF របស់អ្នកគ្រូដើម្បីបង្កើតតេស្តស្វ័យប្រវត្តិ")
+# ២. កំណត់ API Key (សូមដូរ YOUR_API_KEY ទៅជា Key ពិតរបស់អ្នកគ្រូ)
+genai.configure(api_key="YOUR_API_KEY")
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-uploaded_pdf = st.file_uploader("ជ្រើសរើស File PDF (Grammar Test)", type="pdf")
+st.title("📄 SEG AI Test Generator")
+st.write("បំប្លែង PDF ទៅជាវិញ្ញាសាប្រឡងស្វ័យប្រវត្តិ ១០០%")
 
-if uploaded_pdf is not None:
-    # ១. អានអក្សរពី PDF
-    reader = PdfReader(uploaded_pdf)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text()
+# ៣. កន្លែង Upload PDF
+uploaded_file = st.file_uploader("Upload ឯកសារ Grammar PDF របស់អ្នកគ្រូ", type="pdf")
+
+if uploaded_file is not None:
+    # អានអត្ថបទពី PDF
+    with st.spinner("កំពុងអានឯកសារ..."):
+        pdf_reader = PdfReader(uploaded_file)
+        text_content = ""
+        for page in pdf_reader.pages:
+            text_content += page.extract_text()
     
-    st.success("អានឯកសារចប់សព្វគ្រប់!")
+    st.success("អាន PDF រួចរាល់!")
 
-    if st.button("ចាប់ផ្តើមបង្កើតតេស្ត ១០០%"):
+    # ប៊ូតុងបង្កើតតេស្ត
+    if st.button("ចាប់ផ្តើមបង្កើតវិញ្ញាសាឥឡូវនេះ"):
         with st.spinner("AI កំពុងរៀបចំសំណួរ..."):
-            model = genai.GenerativeModel('gemini-pro')
-            
-            # បញ្ជា AI ឱ្យបង្កើតតេស្ត
+            # ប្រើ Prompt ពិសេសដើម្បីឱ្យដូចសៀវភៅ Grammar Test
             prompt = f"""
-            ផ្អែកលើខ្លឹមសារអត្ថបទខាងក្រោម សូមបង្កើតសំណួរតេស្ត Grammar បែប Multiple Choice (A, B, C, D) 
-            ចំនួន ១០ សំណួរ ឱ្យមានទម្រង់ដូចក្នុងសៀវភៅតេស្តអន្តរជាតិ៖
+            ផ្អែកលើខ្លឹមសារ PDF នេះ សូមបង្កើតវិញ្ញាសា Grammar Test ចំនួន ១០ សំណួរ។
+            លក្ខខណ្ឌ៖
+            1. ទម្រង់សំណួរ៖ "Q1: [សំណួរ] / (a) [ជម្រើស] (b) [ជម្រើស] (c) [ជម្រើស] (d) [ជម្រើស]"។
+            2. កម្រិត៖ ឱ្យត្រូវតាមខ្លឹមសារមេរៀនក្នុង PDF។
+            3. ចម្លើយ៖ បង្ហាញ Key Answer នៅផ្នែកខាងក្រោមបង្អស់នៃវិញ្ញាសា (ដូចក្នុងសៀវភៅ PDF)។
             
-            ខ្លឹមសារ៖ {text[:3000]}  # យកតែ ៣០០០ អក្សរដំបូងដើម្បីកុំឱ្យលើសកំណត់
+            ខ្លឹមសារឯកសារ៖
+            {text_content[:10000]} 
             """
             
             response = model.generate_content(prompt)
             
+            # បង្ហាញលទ្ធផល
             st.divider()
-            st.subheader("📝 វិញ្ញាសាតេស្តដែលបានបង្កើត៖")
-            st.write(response.text)
+            st.subheader("📝 វិញ្ញាសាដែលបានបង្កើតរួចរាល់")
+            st.markdown(response.text)
+            
+            # ប៊ូតុងសម្រាប់ Copy ឬ Download (Optional)
+            st.download_button("📥 ទាញយកជា Text File", response.text, file_name="generated_test.txt")
