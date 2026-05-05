@@ -1,5 +1,2 @@
-streamlit
-pandas
-plotly
-google-generativeai
 PyPDF2
+google-generativeai
