@@ -1,103 +1,119 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-import io
 
-# 1. Page Configuration
-st.set_page_config(page_title="SEG AI Master 2026", page_icon="🏫", layout="wide")
+# ១. ការកំណត់ទំព័រ (Settings)
+st.set_page_config(
+    page_title="SEG Management & AI Quiz Master", 
+    page_icon="🏫", 
+    layout="wide"
+)
 
-# 2. Secure AI Setup
-# ប្រើ model 'gemini-1.5-flash' ដែលជា Version ថ្មីបំផុត និងខ្លាំងបំផុតសម្រាប់ PDF
+# ២. កំណត់ API Key របស់អ្នកគ្រូ
 API_KEY = "AIzaSyBHcXDGDZjE43glfOLCCspV1N1NhIX05S4"
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 3. Clean CSS
+# ៣. CSS សម្រាប់ដេគ័រឱ្យស្អាត
 st.markdown("""
-<style>
-    .stButton>button {width: 100%; border-radius: 10px; height: 3em; background-color: #003057; color: white; font-weight: bold;}
-    .reportview-container {background: #fdfdfd}
-    .footer {text-align: center; color: #999; font-size: 0.8em; margin-top: 60px; border-top: 1px solid #eee; padding-top: 20px;}
-</style>
-""", unsafe_allow_html=True)
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
+    .footer-text { text-align: center; color: #666; padding: 20px; border-top: 1px solid #eee; margin-top: 50px; }
+    footer {visibility: hidden;}
+    </style>
+    """, unsafe_allow_html=True)
 
-# 4. Sidebar Navigation
-with st.sidebar:
-    try:
-        st.image("logo.png", use_container_width=True)
-    except:
-        st.markdown("<h2 style='text-align: center;'>🏫 SEG SCHOOL</h2>", unsafe_allow_html=True)
+# ៤. មុខងារជំនួយ (Helper Functions)
+def calculate_grade(score):
+    if score >= 97: return "A+"
+    elif score >= 90: return "A"
+    elif score >= 80: return "B"
+    elif score >= 70: return "C"
+    elif score >= 60: return "D"
+    else: return "F"
+
+# ៥. Session State សម្រាប់រក្សាទុកទិន្នន័យ
+if 'db' not in st.session_state:
+    st.session_state.db = pd.DataFrame(columns=['Student Name', 'Level', 'Average (%)', 'Result Grade'])
+
+# --- ៦. SIDEBAR (ម៉ឺនុយបញ្ជា) ---
+st.sidebar.image("logo.png", width=120) if st.sidebar.button("Home") else None
+menu = st.sidebar.radio("ជ្រើសរើសមុខងារ", ["📊 គ្រប់គ្រងពិន្ទុសិស្ស", "📝 បង្កើតតេស្តស្វ័យប្រវត្តិ (AI)"])
+
+# ==========================================
+# មុខងារទី ១៖ គ្រប់គ្រងពិន្ទុសិស្ស SEG
+# ==========================================
+if menu == "📊 គ្រប់គ្រងពិន្ទុសិស្ស":
+    st.title("🏫 SEG Student Management")
+    st.write("Branch: **Prek Leap** | Academic Year: 2026")
     
-    st.divider()
-    menu = st.radio("Menu Navigation", ["📊 Dashboard", "📝 AI Quiz Generator"])
-    st.divider()
-    st.info("Location: Prek Leap Branch\nDeveloper: CHAN Sokhoeurn")
+    # បញ្ចូលឈ្មោះសិស្ស
+    with st.expander("➕ បន្ថែមឈ្មោះសិស្សថ្មី"):
+        new_name = st.text_input("ឈ្មោះសិស្ស")
+        if st.button("រក្សាទុកឈ្មោះ"):
+            if new_name:
+                new_row = pd.DataFrame([[new_name, "Level 1", 0, "F"]], columns=st.session_state.db.columns)
+                st.session_state.db = pd.concat([st.session_state.db, new_row], ignore_index=True)
+                st.rerun()
 
-# 5. Dashboard Functionality
-if menu == "📊 Dashboard":
-    st.title("📊 Student Management Dashboard")
-    st.info("ប្រព័ន្ធកំពុងដំណើរការជាធម្មតា។ អ្នកគ្រូអាចប្រើប្រាស់មុខងារ Quiz Generator ក្នុង Menu ខាងឆ្វេង។")
+    # បង្ហាញតារាងពិន្ទុ
+    if not st.session_state.db.empty:
+        st.subheader("Leaderboard")
+        st.dataframe(st.session_state.db, use_container_width=True)
+    else:
+        st.info("មិនទាន់មានទិន្នន័យសិស្សនៅឡើយទេ។")
 
-# 6. AI Quiz Generator (Optimized for 1,500 Pages)
-else:
-    st.title("📝 AI Smart Quiz Generator")
-    st.write("បង្កើតវិញ្ញាសាតេស្ត ១០០% ចេញពីសៀវភៅ PDF ធំៗ")
+# ==========================================
+# មុខងារទី ២៖ បង្កើតតេស្តស្វ័យប្រវត្តិ (AI)
+# ==========================================
+elif menu == "📝 បង្កើតតេស្តស្វ័យប្រវត្តិ (AI)":
+    st.title("📄 AI Quiz Master 100%")
+    st.write("Upload PDF ដើម្បីឱ្យ AI រៀបចំវិញ្ញាសាដូចក្នុងសៀវភៅ")
 
-    uploaded_file = st.file_uploader("Upload Your Grammar Book (PDF)", type="pdf")
+    uploaded_pdf = st.file_uploader("ជ្រើសរើស File Grammar PDF", type="pdf")
 
-    if uploaded_file:
-        # បង្កើត Reader ដើម្បីឆែកចំនួនទំព័រ
-        pdf_reader = PdfReader(io.BytesIO(uploaded_file.read()))
-        total_pgs = len(pdf_reader.pages)
-        st.success(f"ឯកសារត្រូវបានបញ្ចូល៖ មានសរុប {total_pgs} ទំព័រ")
+    if uploaded_pdf:
+        # អាន PDF
+        with st.spinner("កំពុងអានខ្លឹមសារមេរៀន..."):
+            reader = PdfReader(uploaded_pdf)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text()
+        
+        st.success("អានឯកសារបានជោគជ័យ!")
 
-        st.divider()
-        col1, col2 = st.columns(2)
-        with col1:
-            level = st.selectbox("កម្រិតតេស្ត (Level)", ["Elementary", "Intermediate", "Advanced"])
-            num_q = st.number_input("ចំនួនសំណួរ (Questions)", min_value=1, max_value=50, value=10)
-        with col2:
-            st.write("🎯 **ជ្រើសរើសទំព័រដែលចង់យកមកធ្វើតេស្ត**")
-            start_p = st.number_input("ចាប់ពីទំព័រ", min_value=1, max_value=total_pgs, value=1)
-            end_p = st.number_input("ដល់ទំព័រ", min_value=1, max_value=total_pgs, value=min(start_p+10, total_pgs))
+        # បញ្ជា AI ឱ្យបង្កើតតេស្ត
+        num_q = st.slider("ចំនួនសំណួរដែលចង់បាន", 5, 20, 10)
+        
+        if st.button("🚀 ចាប់ផ្តើមបង្កើតវិញ្ញាសា"):
+            with st.spinner("AI កំពុងរៀបចំសំណួរ និងជម្រើសចម្លើយ..."):
+                prompt = f"""
+                ផ្អែកលើខ្លឹមសារ PDF នេះ សូមបង្កើតវិញ្ញាសា Grammar Test ចំនួន {num_q} សំណួរ។
+                លក្ខខណ្ឌតឹងរ៉ឹង៖
+                1. ទម្រង់សំណួរត្រូវតែដូចក្នុងសៀវភៅ៖ Q1: [សំណួរ] / (a) (b) (c) (d)។
+                2. ត្រូវមាន "Answer Key" នៅផ្នែកខាងក្រោមបង្អស់។
+                3. សំណួរត្រូវតែដកស្រង់ចេញពីខ្លឹមសារមេរៀនក្នុង PDF នេះប៉ុណ្ណោះ។
+                
+                ខ្លឹមសារ PDF៖
+                {text[:15000]}
+                """
+                
+                response = model.generate_content(prompt)
+                
+                st.divider()
+                st.subheader("📝 វិញ្ញាសាតេស្តរបស់អ្នកគ្រូ")
+                st.markdown(response.text)
+                
+                # ប៊ូតុងទាញយក
+                st.download_button("📥 Download Test (.txt)", response.text, file_name="SEG_AI_Test.txt")
 
-        if st.button("🚀 ចាប់ផ្តើមរៀបចំវិញ្ញាសា"):
-            if start_p > end_p:
-                st.error("កំហុស៖ ទំព័រចាប់ផ្ដើមមិនអាចធំជាងទំព័របញ្ចប់ទេ។")
-            else:
-                with st.spinner(f"AI កំពុងវិភាគទំព័រទី {start_p} ដល់ {end_p}..."):
-                    try:
-                        # ចាប់យកអត្ថបទតែក្នុងចន្លោះទំព័រដែលអ្នកគ្រូកំណត់ (ដើម្បីការពារកុំឱ្យ AI គាំង)
-                        context_text = ""
-                        for i in range(start_p - 1, end_p):
-                            context_text += pdf_reader.pages[i].extract_text()
-                        
-                        # បញ្ជា AI ឱ្យធ្វើការ
-                        prompt = f"""
-                        Task: Create a professional English Grammar Test.
-                        Source Content: {context_text[:15000]}
-                        Level: {level}
-                        Total Questions: {num_q}
-                        
-                        Rules:
-                        1. Format each question as: "Q1: [Question] / (a) (b) (c) (d)".
-                        2. Questions must be 100% based on the logic from the uploaded PDF.
-                        3. Provide the Answer Key at the very end.
-                        4. Language: English.
-                        """
-                        
-                        response = model.generate_content(prompt)
-                        
-                        # បង្ហាញលទ្ធផល
-                        st.divider()
-                        st.subheader("✨ វិញ្ញាសាតេស្តដែលបានបង្កើត")
-                        st.markdown(response.text)
-                        
-                        # ប៊ូតុង Download
-                        st.download_button("📥 Download Test (TXT)", response.text, file_name=f"SEG_Test_P{start_p}-{end_p}.txt")
-                        
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-
-st.markdown('<div class="footer">© 2026 SEG School Management System | Prek Leap Branch</div>', unsafe_allow_html=True)
+# --- ៧. FOOTER ---
+st.markdown(f"""
+    <div class="footer-text">
+        <p>Developed with ❤️ by <b>CHAN Sokhoeurn, C2/DBA</b></p>
+        <p>© 2026 SEG School Management | AI Integrated</p>
+    </div>
+    """, unsafe_allow_html=True)
